@@ -31,8 +31,11 @@ impl Connect {
         let s_addr = addr.clone();
         tokio::spawn(async move {
             while let Ok(len) = reader.read_u32_le().await {
+                if len ==0{
+                    break;
+                }
                 let mut buff = vec![0; len as usize];
-                if reader.read(&mut buff).await.is_err() {
+                if reader.read_exact(&mut buff).await.is_err() {
                     break;
                 }
                 if let Err(er) = tx.send(ConnectCmd::Buff(buff)).await {

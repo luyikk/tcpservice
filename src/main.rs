@@ -19,8 +19,8 @@ use lazy_static::lazy_static;
 use bytes::Bytes;
 use json::JsonValue;
 
-/// 最大数据表长度限制 2M
-const MAX_BUFF_LEN:u32=2*1024*1024;
+/// 最大数据表长度限制 4M
+const MAX_BUFF_LEN:usize=4*1024*1024;
 
 
 #[global_allocator]
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     SERVICE_MANAGER.start().await?;
     USER_PEER_MANAGER.set_service_handler(SERVICE_MANAGER.get_handler());
 
-    let tcpserver = TCPServer::<_, _>::new(format!("127.0.0.1:{}",SERVICE_CFG["listenPort"].as_i32().unwrap()), buff_input).await?;
+    let tcpserver = TCPServer::<_, _>::new(format!("0.0.0.0:{}",SERVICE_CFG["listenPort"].as_i32().unwrap()), buff_input).await?;
     tcpserver.set_connection_event(|addr| {
         info!("addr:{} connect", addr);
         true
@@ -77,7 +77,8 @@ async fn buff_input(mut peer: TCPPeer) {
     match client_peer.open(0) {
         Ok(_) => {
             //读取数据包长度
-            while let Ok(packer_len) = peer.reader.read_u32().await {
+            while let Ok(packer_len) = peer.reader.read_u32_le().await {
+                let packer_len:usize=packer_len as usize;
                 //如果没有OPEN 直接掐线
                 if !client_peer.is_open_zero.load(Ordering::Acquire) {
                     warn!("peer:{} not open send data,disconnect!", client_peer);
@@ -85,12 +86,15 @@ async fn buff_input(mut peer: TCPPeer) {
                 }
                 // 如果长度为0 或者超过最大限制 掐线
                 if packer_len == 0 || packer_len >MAX_BUFF_LEN{
+                    warn!("disconnect peer:{} packer len error:{}",client_peer,packer_len);
                     break;
                 }
+
                 // 创建一个vector 用来接收指定长度的数据,这样就可以避免粘包问题
-                let mut data = vec![0; packer_len as usize];
-                match peer.reader.read(&mut data).await {
+                let mut data = vec![0; packer_len];
+                match peer.reader.read_exact(&mut data).await {
                     Ok(len) if len == 0 => {
+                        warn!("disconnect peer:{} len is 0 ",client_peer);
                         break;
                     }
                     Err(er) => {
@@ -98,13 +102,14 @@ async fn buff_input(mut peer: TCPPeer) {
                         break;
                     }
                     Ok(len) => {
-                        if len as u32 == packer_len {
+                        if len == packer_len {
                             //数据包读取成功 输入逻辑处理
                             if let Err(er) = client_peer.input_buff(&mut sender, &mut service_handler, Bytes::from(data)).await {
                                 error!("peer:{} input buff error:{}->{:?}", client_peer, er, er);
                                 break;
                             }
                         }else{
+                            warn!("disconnect peer:{} read len error:{}!={}",client_peer,len,packer_len);
                             break;
                         }
                     }
