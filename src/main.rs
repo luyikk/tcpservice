@@ -1,30 +1,29 @@
 #![allow(dead_code)]
-mod tcp;
-mod users;
 mod services;
 mod stdout_log;
+mod tcp;
+mod users;
 
+use crate::stdout_log::StdErrLog;
 use crate::tcp::TCPPeer;
 use crate::users::ClientPeer;
-use users::UserClientManager;
-use services::ServicesManager;
+use bytes::Bytes;
+use flexi_logger::{Age, Cleanup, Criterion, LogTarget, Naming};
+use json::JsonValue;
+use lazy_static::lazy_static;
 use log::*;
+use mimalloc::MiMalloc;
+use services::ServicesManager;
+use std::env::args;
 use std::error::Error;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tcp::TCPServer;
 use tokio::io::AsyncReadExt;
-use mimalloc::MiMalloc;
-use lazy_static::lazy_static;
-use bytes::Bytes;
-use json::JsonValue;
-use std::env::args;
-use flexi_logger::{LogTarget, Criterion, Naming, Cleanup, Age};
-use crate::stdout_log::StdErrLog;
+use users::UserClientManager;
 
 /// 最大数据表长度限制 4M
-const MAX_BUFF_LEN:usize=4*1024*1024;
-
+const MAX_BUFF_LEN: usize = 4 * 1024 * 1024;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -48,7 +47,6 @@ lazy_static! {
     pub static ref SERVICE_MANAGER:Arc<ServicesManager>=ServicesManager::new(&SERVICE_CFG,USER_PEER_MANAGER.get_handle()).unwrap();
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     //Builder::new().filter_level(LevelFilter::Debug).init();
@@ -56,7 +54,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     SERVICE_MANAGER.start().await?;
     USER_PEER_MANAGER.set_service_handler(SERVICE_MANAGER.get_handler());
 
-    let tcpserver = TCPServer::<_, _>::new(format!("0.0.0.0:{}",SERVICE_CFG["listenPort"].as_i32().unwrap()), buff_input).await?;
+    let tcpserver = TCPServer::<_, _>::new(
+        format!("0.0.0.0:{}", SERVICE_CFG["listenPort"].as_i32().unwrap()),
+        buff_input,
+    )
+    .await?;
     tcpserver.set_connection_event(|addr| {
         info!("addr:{} connect", addr);
         true
@@ -68,29 +70,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// 数据包输入
 async fn buff_input(mut peer: TCPPeer) {
     //创建一个客户端PEER,同时把地址和发送克隆进去
-    let client_peer = Arc::new(ClientPeer::new(peer.addr, peer.get_sender(),SERVICE_MANAGER.get_handler()));
+    let client_peer = Arc::new(ClientPeer::new(
+        peer.addr,
+        peer.get_sender(),
+        SERVICE_MANAGER.get_handler(),
+    ));
     //通知客户端管理器创建一个客户端
-    let mut manager_handler=USER_PEER_MANAGER.get_handle();
-    if let Err(er)=manager_handler.create_peer(client_peer.clone()){
-        error!("create peer:{} error:{}->{:?}",client_peer,er,er);
+    let mut manager_handler = USER_PEER_MANAGER.get_handle();
+    if let Err(er) = manager_handler.create_peer(client_peer.clone()) {
+        error!("create peer:{} error:{}->{:?}", client_peer, er, er);
         return;
     }
-    let mut sender =peer.get_sender();
-    let mut service_handler=SERVICE_MANAGER.get_handler();
+    let mut sender = peer.get_sender();
+    let mut service_handler = SERVICE_MANAGER.get_handler();
     debug!("create peer:{}", client_peer.session_id);
     match client_peer.open(0) {
         Ok(_) => {
             //读取数据包长度
             while let Ok(packer_len) = peer.reader.read_u32_le().await {
-                let packer_len:usize=packer_len as usize;
+                let packer_len: usize = packer_len as usize;
                 //如果没有OPEN 直接掐线
                 if !client_peer.is_open_zero.load(Ordering::Acquire) {
                     warn!("peer:{} not open send data,disconnect!", client_peer);
                     break;
                 }
                 // 如果长度为0 或者超过最大限制 掐线
-                if packer_len >MAX_BUFF_LEN{
-                    warn!("disconnect peer:{} packer len error:{}",client_peer,packer_len);
+                if packer_len > MAX_BUFF_LEN {
+                    warn!(
+                        "disconnect peer:{} packer len error:{}",
+                        client_peer, packer_len
+                    );
                     break;
                 }
 
@@ -103,7 +112,10 @@ async fn buff_input(mut peer: TCPPeer) {
                     }
                     Ok(_len) => {
                         //数据包读取成功 输入逻辑处理
-                        if let Err(er) = client_peer.input_buff(&mut sender, &mut service_handler, Bytes::from(data)).await {
+                        if let Err(er) = client_peer
+                            .input_buff(&mut sender, &mut service_handler, Bytes::from(data))
+                            .await
+                        {
                             error!("peer:{} input buff error:{}->{:?}", client_peer, er, er);
                             break;
                         }
@@ -114,12 +126,11 @@ async fn buff_input(mut peer: TCPPeer) {
         Err(er) => error!("peer:{} open err:{}->{:?}", client_peer, er, er),
     }
     //断线处理删除用户管理器里的PEER 彻底删除PEER
-    if let Err(er)= manager_handler.remove_peer(client_peer.session_id){
-        error!("remove peer:{} error:{}->{:?}",client_peer,er,er);
+    if let Err(er) = manager_handler.remove_peer(client_peer.session_id) {
+        error!("remove peer:{} error:{}->{:?}", client_peer, er, er);
     }
     info!("{} disconnect", client_peer);
 }
-
 
 /// 安装日及系统
 fn init_log_system() {

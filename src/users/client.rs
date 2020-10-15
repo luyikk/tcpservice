@@ -1,16 +1,15 @@
+use crate::services::{ServiceHandler, ServicesCmd};
+use bytes::{Buf, BufMut, Bytes};
 use core::fmt;
+use log::*;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering, AtomicI64};
-use tokio::sync::mpsc::Sender;
-use xbinary::{XBWrite, XBRead};
-use bytes::{Bytes, Buf, BufMut};
-use log::*;
-use tokio::time::{delay_for, Duration};
-use crate::services::{ServiceHandler, ServicesCmd};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use tokio::sync::mpsc::error::SendError;
-
+use tokio::sync::mpsc::Sender;
+use tokio::time::{delay_for, Duration};
+use xbinary::{XBRead, XBWrite};
 
 /// 客户端PEER
 
@@ -20,7 +19,7 @@ pub struct ClientPeer {
     pub sender: Sender<XBWrite>,
     pub is_open_zero: AtomicBool,
     pub service_handler: ServiceHandler,
-    pub last_recv_time:AtomicI64
+    pub last_recv_time: AtomicI64,
 }
 
 impl Display for ClientPeer {
@@ -34,14 +33,18 @@ static MAKE_SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
 impl ClientPeer {
     /// 创建一个客户端PEER
-    pub fn new(addr: SocketAddr, sender: Sender<XBWrite>,service_handler: ServiceHandler) -> ClientPeer {
+    pub fn new(
+        addr: SocketAddr,
+        sender: Sender<XBWrite>,
+        service_handler: ServiceHandler,
+    ) -> ClientPeer {
         ClientPeer {
             session_id: Self::make_conv(),
             addr,
             sender,
             is_open_zero: AtomicBool::new(false),
             service_handler,
-            last_recv_time:AtomicI64::new(Self::timestamp())
+            last_recv_time: AtomicI64::new(Self::timestamp()),
         }
     }
 
@@ -68,24 +71,28 @@ impl ClientPeer {
         if service_id == 0 {
             self.kick().await?;
         } else {
-            self.send_close( service_id).await?;
+            self.send_close(service_id).await?;
         }
         Ok(())
     }
 
-
-
     /// 数据包输入
-    pub async fn input_buff(&self,sender:&mut Sender<XBWrite>, service_handler:&mut ServiceHandler, data:Bytes)-> Result<(), Box<dyn Error>>{
-        let mut reader = XBRead::new( data);
+    pub async fn input_buff(
+        &self,
+        sender: &mut Sender<XBWrite>,
+        service_handler: &mut ServiceHandler,
+        data: Bytes,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut reader = XBRead::new(data);
         let server_id = reader.get_u32_le();
-        self.last_recv_time.store(Self::timestamp(),Ordering::Release);
+        self.last_recv_time
+            .store(Self::timestamp(), Ordering::Release);
         match server_id {
             //给网关发送数据包,默认当PING包无脑回
             0xFFFFFFFF => {
-                self.send(sender,server_id, &reader).await?;
-            },
-            _=>{
+                self.send(sender, server_id, &reader).await?;
+            }
+            _ => {
                 //前置检测 如果没有OPEN 0 不能发送
                 if !self.is_open_zero.load(Ordering::Acquire) {
                     self.kick().await?;
@@ -112,10 +119,9 @@ impl ClientPeer {
         Ok(())
     }
 
-
     /// 发送 CLOSE 0 后立即断线清理内存
     async fn kick(&self) -> Result<(), Box<dyn Error>> {
-        self.send_close( 0).await?;
+        self.send_close(0).await?;
         self.disconnect_now().await?;
         Ok(())
     }
@@ -137,10 +143,14 @@ impl ClientPeer {
         Ok(())
     }
 
-
     /// 发送数据
     #[inline]
-    pub async fn send(&self,sender:&mut Sender<XBWrite>, session_id: u32, data: &[u8]) -> Result<(), Box<dyn Error>> {
+    pub async fn send(
+        &self,
+        sender: &mut Sender<XBWrite>,
+        session_id: u32,
+        data: &[u8],
+    ) -> Result<(), Box<dyn Error>> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(session_id);
@@ -150,7 +160,6 @@ impl ClientPeer {
         sender.send(writer).await?;
         Ok(())
     }
-
 
     /// 发送OPEN
     #[inline]
@@ -166,8 +175,6 @@ impl ClientPeer {
         Ok(())
     }
 
-
-
     /// 发送CLOSE 0
     #[inline]
     pub async fn send_close(&self, service_id: u32) -> Result<(), Box<dyn Error>> {
@@ -181,7 +188,6 @@ impl ClientPeer {
         self.sender.clone().send(writer).await?;
         Ok(())
     }
-
 
     /// 获取时间戳
     #[inline]
