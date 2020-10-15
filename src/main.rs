@@ -2,12 +2,12 @@
 mod tcp;
 mod users;
 mod services;
+mod stdout_log;
 
 use crate::tcp::TCPPeer;
 use crate::users::ClientPeer;
 use users::UserClientManager;
 use services::ServicesManager;
-use env_logger::Builder;
 use log::*;
 use std::error::Error;
 use std::sync::atomic::Ordering;
@@ -18,6 +18,9 @@ use mimalloc::MiMalloc;
 use lazy_static::lazy_static;
 use bytes::Bytes;
 use json::JsonValue;
+use std::env::args;
+use flexi_logger::{LogTarget, Criterion, Naming, Cleanup, Age};
+use crate::stdout_log::StdErrLog;
 
 /// 最大数据表长度限制 4M
 const MAX_BUFF_LEN:usize=4*1024*1024;
@@ -39,7 +42,7 @@ lazy_static! {
     };
 
     /// 用户管理
-    pub static ref USER_PEER_MANAGER: Arc<UserClientManager> = UserClientManager::new();
+    pub static ref USER_PEER_MANAGER: Arc<UserClientManager> = UserClientManager::new(SERVICE_CFG["clientTimeoutSeconds"].as_u32().unwrap());
 
     /// 服务管理
     pub static ref SERVICE_MANAGER:Arc<ServicesManager>=ServicesManager::new(&SERVICE_CFG,USER_PEER_MANAGER.get_handle()).unwrap();
@@ -48,7 +51,8 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    Builder::new().filter_level(LevelFilter::Debug).init();
+    //Builder::new().filter_level(LevelFilter::Debug).init();
+    init_log_system();
     SERVICE_MANAGER.start().await?;
     USER_PEER_MANAGER.set_service_handler(SERVICE_MANAGER.get_handler());
 
@@ -85,7 +89,7 @@ async fn buff_input(mut peer: TCPPeer) {
                     break;
                 }
                 // 如果长度为0 或者超过最大限制 掐线
-                if packer_len == 0 || packer_len >MAX_BUFF_LEN{
+                if packer_len >MAX_BUFF_LEN{
                     warn!("disconnect peer:{} packer len error:{}",client_peer,packer_len);
                     break;
                 }
@@ -93,23 +97,14 @@ async fn buff_input(mut peer: TCPPeer) {
                 // 创建一个vector 用来接收指定长度的数据,这样就可以避免粘包问题
                 let mut data = vec![0; packer_len];
                 match peer.reader.read_exact(&mut data).await {
-                    Ok(len) if len == 0 => {
-                        warn!("disconnect peer:{} len is 0 ",client_peer);
-                        break;
-                    }
                     Err(er) => {
                         error!("peer:{} read data error:{}->{:?}", client_peer, er, er);
                         break;
                     }
-                    Ok(len) => {
-                        if len == packer_len {
-                            //数据包读取成功 输入逻辑处理
-                            if let Err(er) = client_peer.input_buff(&mut sender, &mut service_handler, Bytes::from(data)).await {
-                                error!("peer:{} input buff error:{}->{:?}", client_peer, er, er);
-                                break;
-                            }
-                        }else{
-                            warn!("disconnect peer:{} read len error:{}!={}",client_peer,len,packer_len);
+                    Ok(_len) => {
+                        //数据包读取成功 输入逻辑处理
+                        if let Err(er) = client_peer.input_buff(&mut sender, &mut service_handler, Bytes::from(data)).await {
+                            error!("peer:{} input buff error:{}->{:?}", client_peer, er, er);
                             break;
                         }
                     }
@@ -123,4 +118,43 @@ async fn buff_input(mut peer: TCPPeer) {
         error!("remove peer:{} error:{}->{:?}",client_peer,er,er);
     }
     info!("{} disconnect", client_peer);
+}
+
+
+/// 安装日及系统
+fn init_log_system() {
+    let mut show_std = false;
+
+    for arg in args() {
+        if arg.trim().to_uppercase() == "--STDLOG" {
+            show_std = true;
+            println!("open stderr log out");
+        }
+    }
+    for (name, arg) in std::env::vars() {
+        if name.trim() == "STDLOG" && arg.trim() == "1" {
+            show_std = true;
+            println!("open stderr log out");
+        }
+    }
+
+    let mut log_set = LogTarget::File;
+    if show_std {
+        log_set = LogTarget::FileAndWriter(Box::new(StdErrLog::new()));
+    }
+
+    flexi_logger::Logger::with_str("debug")
+        .log_target(log_set)
+        .suffix("log")
+        .directory("logs")
+        .rotate(
+            Criterion::AgeOrSize(Age::Day, 1024 * 1024 * 5),
+            Naming::Numbers,
+            Cleanup::KeepLogFiles(30),
+        )
+        .print_message()
+        .format(flexi_logger::opt_format)
+        .set_palette("196;208;6;7;8".into())
+        .start()
+        .unwrap();
 }

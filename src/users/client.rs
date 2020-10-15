@@ -2,7 +2,7 @@ use core::fmt;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering, AtomicI64};
 use tokio::sync::mpsc::Sender;
 use xbinary::{XBWrite, XBRead};
 use bytes::{Bytes, Buf, BufMut};
@@ -20,6 +20,7 @@ pub struct ClientPeer {
     pub sender: Sender<XBWrite>,
     pub is_open_zero: AtomicBool,
     pub service_handler: ServiceHandler,
+    pub last_recv_time:AtomicI64
 }
 
 impl Display for ClientPeer {
@@ -39,7 +40,8 @@ impl ClientPeer {
             addr,
             sender,
             is_open_zero: AtomicBool::new(false),
-            service_handler
+            service_handler,
+            last_recv_time:AtomicI64::new(Self::timestamp())
         }
     }
 
@@ -77,6 +79,7 @@ impl ClientPeer {
     pub async fn input_buff(&self,sender:&mut Sender<XBWrite>, service_handler:&mut ServiceHandler, data:Bytes)-> Result<(), Box<dyn Error>>{
         let mut reader = XBRead::new( data);
         let server_id = reader.get_u32_le();
+        self.last_recv_time.store(Self::timestamp(),Ordering::Release);
         match server_id {
             //给网关发送数据包,默认当PING包无脑回
             0xFFFFFFFF => {
@@ -136,6 +139,7 @@ impl ClientPeer {
 
 
     /// 发送数据
+    #[inline]
     pub async fn send(&self,sender:&mut Sender<XBWrite>, session_id: u32, data: &[u8]) -> Result<(), Box<dyn Error>> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
@@ -149,6 +153,7 @@ impl ClientPeer {
 
 
     /// 发送OPEN
+    #[inline]
     pub async fn send_open(&self, service_id: u32) -> Result<(), Box<dyn Error>> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
@@ -164,6 +169,7 @@ impl ClientPeer {
 
 
     /// 发送CLOSE 0
+    #[inline]
     pub async fn send_close(&self, service_id: u32) -> Result<(), Box<dyn Error>> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
@@ -177,7 +183,11 @@ impl ClientPeer {
     }
 
 
-
+    /// 获取时间戳
+    #[inline]
+    fn timestamp() -> i64 {
+        chrono::Local::now().timestamp_nanos() / 100
+    }
 
     /// 生成一个u32的conv
     #[inline]

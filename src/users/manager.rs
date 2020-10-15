@@ -9,6 +9,9 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel, UnboundedReceiver};
 use tokio::sync::mpsc::error::SendError;
 use log::*;
 use crate::services::ServiceHandler;
+use tokio::time::{delay_for, Duration};
+use std::sync::atomic::Ordering;
+
 
 pub enum ClientHandleCmd {
     CreatePeer(Arc<ClientPeer>),
@@ -17,6 +20,7 @@ pub enum ClientHandleCmd {
     ClosePeer(u32, u32),
     KickPeer(u32, u32, i32),
     SendBuffer(u32, u32, XBRead),
+    CheckTimeOut
 }
 
 impl Debug for ClientHandleCmd {
@@ -52,6 +56,9 @@ impl Debug for ClientHandleCmd {
                 .field("session_id", session_id)
                 .field("buff", &buff.to_vec())
                 .finish(),
+            CheckTimeOut=>f
+                .debug_struct("CheckTimeOut")
+                .finish()
         }
     }
 }
@@ -112,6 +119,7 @@ pub struct UserClientManager{
     users:RefCell<AHashMap<u32,Arc<ClientPeer>>>,
     handle: ClientHandle,
     service_handle: RefCell<Option<ServiceHandler>>,
+    client_timeout_tick:i64
 }
 
 unsafe impl Send for UserClientManager {}
@@ -119,14 +127,27 @@ unsafe impl Sync for UserClientManager {}
 
 impl UserClientManager {
     /// 创建客户端管理器
-    pub fn new() -> Arc<UserClientManager> {
+    pub fn new(client_timeout_sec:u32) -> Arc<UserClientManager> {
         let (tx, rx) = unbounded_channel();
         let res = Arc::new(UserClientManager {
             users: RefCell::new(AHashMap::new()),
-            handle: ClientHandle::new(tx),
+            handle: ClientHandle::new(tx.clone()),
             service_handle: RefCell::new(None),
+            client_timeout_tick: (client_timeout_sec * 10000000) as i64
         });
         Self::recv(res.clone(), rx);
+
+        //检测客户端通信超时
+        tokio::spawn(async move{
+            loop {
+                if let Err(er)= tx.send(CheckTimeOut){
+                    error!("check time out err:{}->{:?}",er,er);
+                }
+                //每隔5秒检查一次
+                delay_for(Duration::from_secs(5)).await;
+            }
+        });
+
         res
     }
 
@@ -220,8 +241,29 @@ impl UserClientManager {
                             }
                         }
                     }
+                    CheckTimeOut=>{
+
+                        let current_timestamp= Self::timestamp();
+                        for user in manager.users.borrow().values() {
+                            if current_timestamp-user.last_recv_time.load(Ordering::Acquire)>manager.client_timeout_tick{
+                                info!("peer:{} timeout need disconnect",user);
+                                if let Err(err)=manager.handle.clone().remove_peer(user.session_id) {
+                                    error!(
+                                        "disconnect peer:{}  error:{}->{:?}",
+                                        user, err, err
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         });
+    }
+
+    /// 获取时间戳
+    #[inline]
+    fn timestamp() -> i64 {
+        chrono::Local::now().timestamp_nanos() / 100
     }
 }
