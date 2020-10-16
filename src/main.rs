@@ -105,6 +105,7 @@ async fn buff_input(mut peer: TCPPeer) {
                     );
                     break;
                 }
+                // 设置长度 接收指定长度的数据
                 unsafe {
                     data.set_len(packer_len);
                 }
