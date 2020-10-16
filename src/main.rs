@@ -7,7 +7,7 @@ mod users;
 use crate::stdout_log::StdErrLog;
 use crate::tcp::TCPPeer;
 use crate::users::ClientPeer;
-use bytes::Bytes;
+use bytes::{BytesMut, Buf};
 use flexi_logger::{Age, Cleanup, Criterion, LogTarget, Naming};
 use json::JsonValue;
 use lazy_static::lazy_static;
@@ -22,8 +22,9 @@ use tcp::TCPServer;
 use tokio::io::AsyncReadExt;
 use users::UserClientManager;
 
-/// 最大数据表长度限制 4M
-const MAX_BUFF_LEN: usize = 4 * 1024 * 1024;
+
+/// 最大数据表长度限制 512K
+const MAX_BUFF_LEN: usize = 512 * 1024;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -86,6 +87,8 @@ async fn buff_input(mut peer: TCPPeer) {
     debug!("create peer:{}", client_peer.session_id);
     match client_peer.open(0) {
         Ok(_) => {
+            // 创建一个vector 用来接收指定长度的数据,这样就可以避免粘包问题
+            let mut data = BytesMut::with_capacity(MAX_BUFF_LEN);
             //读取数据包长度
             while let Ok(packer_len) = peer.reader.read_u32_le().await {
                 let packer_len: usize = packer_len as usize;
@@ -102,9 +105,9 @@ async fn buff_input(mut peer: TCPPeer) {
                     );
                     break;
                 }
-
-                // 创建一个vector 用来接收指定长度的数据,这样就可以避免粘包问题
-                let mut data = vec![0; packer_len];
+                unsafe {
+                    data.set_len(packer_len);
+                }
                 match peer.reader.read_exact(&mut data).await {
                     Err(er) => {
                         error!("peer:{} read data error:{}->{:?}", client_peer, er, er);
@@ -113,7 +116,7 @@ async fn buff_input(mut peer: TCPPeer) {
                     Ok(_len) => {
                         //数据包读取成功 输入逻辑处理
                         if let Err(er) = client_peer
-                            .input_buff(&mut sender, &mut service_handler, Bytes::from(data))
+                            .input_buff(&mut sender, &mut service_handler, data.to_bytes())
                             .await
                         {
                             error!("peer:{} input buff error:{}->{:?}", client_peer, er, er);
@@ -134,7 +137,7 @@ async fn buff_input(mut peer: TCPPeer) {
 
 /// 安装日及系统
 fn init_log_system() {
-    let mut show_std = false;
+    let mut show_std = true;
 
     for arg in args() {
         if arg.trim().to_uppercase() == "--STDLOG" {
