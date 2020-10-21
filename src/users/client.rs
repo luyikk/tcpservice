@@ -23,6 +23,13 @@ pub struct ClientPeer {
     pub last_recv_time: AtomicI64,
 }
 
+impl Drop for ClientPeer{
+    fn drop(&mut self) {
+        debug!{"ClientPeer:{} drop",self}
+    }
+}
+
+
 impl Display for ClientPeer {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}-{}", self.session_id, self.addr)

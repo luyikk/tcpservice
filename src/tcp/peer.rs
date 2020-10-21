@@ -3,11 +3,18 @@ use std::net::SocketAddr;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::sync::mpsc::Sender;
 use xbinary::XBWrite;
+use log::*;
 
 pub struct TCPPeer {
     pub addr: SocketAddr,
     pub reader: OwnedReadHalf,
     pub sender: Sender<XBWrite>,
+}
+
+impl Drop for TCPPeer{
+    fn drop(&mut self) {
+       debug!{"Tcp peer:{} drop",self.addr}
+    }
 }
 
 impl TCPPeer {
