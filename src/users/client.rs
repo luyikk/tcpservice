@@ -144,7 +144,9 @@ impl ClientPeer {
             .clone()
             .disconnect_events(self.session_id)?;
 
-        self.sender.clone().send(XBWrite::new()).await?;
+        if let Err(er)= self.sender.clone().send(XBWrite::new()).await{
+            warn!("disconnect err:{},It may have been disconnected",er);
+        }
 
         info!("peer:{} disconnect Cleanup", self);
 
