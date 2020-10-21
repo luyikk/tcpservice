@@ -15,6 +15,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{delay_for, Duration};
 use xbinary::{XBRead, XBWrite};
 
+
 ///用于存放发送句柄
 pub struct Sender(RefCell<Option<UnboundedSender<XBWrite>>>);
 
@@ -168,6 +169,21 @@ impl Service {
                                             }
                                         }
                                     }
+                                }
+                                ConnectCmd::Disconnect=>{
+                                    unsafe {
+                                        warn!("service:{} disconnect start close all users",service_id);
+                                        let mut need_close_ids=Vec::with_capacity((*inner.open_table.get()).len());
+                                        for p in (*inner.open_table.get()).iter() {
+                                            need_close_ids.push(p.clone())
+                                        }
+                                        (*inner.open_table.get()).clear();
+
+                                        if let Err(er)= inner.client_handle.clone().close_all_user(service_id,need_close_ids){
+                                            error!("service:{} disconnect close all user err{}",service_id,er);
+                                        }
+                                    }
+                                    break;
                                 }
                             }
                         }

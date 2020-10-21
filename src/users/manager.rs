@@ -20,6 +20,7 @@ pub enum ClientHandleCmd {
     KickPeer(u32, u32, i32),
     SendBuffer(u32, u32, XBRead),
     CheckTimeOut,
+    CloseAllPlayer(u32,Vec<u32>),
 }
 
 impl Debug for ClientHandleCmd {
@@ -56,6 +57,11 @@ impl Debug for ClientHandleCmd {
                 .field("buff", &buff.to_vec())
                 .finish(),
             CheckTimeOut => f.debug_struct("CheckTimeOut").finish(),
+            CloseAllPlayer(server_id,users) =>f
+                .debug_struct("DropAllPlayer")
+                .field("server_id",server_id)
+                .field("users",users)
+                .finish()
         }
     }
 }
@@ -72,6 +78,9 @@ impl ClientHandle {
         ClientHandle { tx }
     }
 
+    pub fn close_all_user(&mut self,service_id:u32,users:Vec<u32>) -> ClientHandleError{
+        self.tx.send(CloseAllPlayer(service_id,users))
+    }
     ///创建客户端
     pub fn create_peer(&mut self, peer: Arc<ClientPeer>) -> ClientHandleError {
         self.tx.send(CreatePeer(peer))
@@ -251,6 +260,15 @@ impl UserClientManager {
                                     manager.handle.clone().remove_peer(user.session_id)
                                 {
                                     error!("disconnect peer:{}  error:{}->{:?}", user, err, err)
+                                }
+                            }
+                        }
+                    },
+                    CloseAllPlayer(service_id,users) =>{
+                        for session_id in users {
+                            if let Some(peer) = manager.get_peer(&session_id) {
+                                if let Err(er) = peer.close_service(service_id).await {
+                                    warn!("CloseAllPlayer service:{} peer:{} err:{}", service_id, session_id, er);
                                 }
                             }
                         }
