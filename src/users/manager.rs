@@ -218,7 +218,7 @@ impl UserClientManager {
                     KickPeer(service_id, session_id, delay_ms) => {
                         if let Some(peer) = manager.get_peer(&session_id) {
                             info!("service:{} kick peer:{}", service_id, peer);
-                            if let Err(err) = peer.kick_wait_ms(delay_ms).await {
+                            if let Err(err) = peer.kick_wait_ms( manager.handle.clone(),delay_ms).await {
                                 error!(
                                     "service:{} kick peer:{} is error:{}->{:?}",
                                     service_id, peer, err, err
@@ -257,6 +257,7 @@ impl UserClientManager {
                     }
                 }
             }
+            error!("manager recv is drop");
         });
     }
 

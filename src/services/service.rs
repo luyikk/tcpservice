@@ -358,10 +358,12 @@ impl Service {
                                 if delay_ms.0 > 0 {
                                     reader.advance(delay_ms.0);
                                     let delay_ms = delay_ms.1;
+
                                     inner
                                         .client_handle
                                         .clone()
                                         .kick_peer(service_id, session_id, delay_ms)?;
+
                                 } else {
                                     return Err(format!(
                                         "service:{} read kick delay is fail",
