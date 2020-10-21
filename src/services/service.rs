@@ -174,7 +174,7 @@ impl Service {
                         break;
                     }
                     Err(er) => {
-                        error!(
+                        warn!(
                             "connect to {}-{}:{} fail:{};restart in 5 seconds",
                             service_id, ip, port, er
                         );
