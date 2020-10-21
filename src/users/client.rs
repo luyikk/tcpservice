@@ -118,7 +118,7 @@ impl ClientPeer {
             delay_for(Duration::from_millis(ms as u64)).await;
             info!("start kick peer:{}",session_id);
             if let Err(er) = sender.send(XBWrite::new()).await {
-                error!("kick_wait_ms err:{}-{:?}", er, er);
+                warn!("kick {} send disconnect err:{}",session_id, er);
             }
         });
 
