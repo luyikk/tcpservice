@@ -113,8 +113,10 @@ impl ClientPeer {
 
         self.send_close(0).await?;
         let mut sender = self.sender.clone();
+        let session_id=self.session_id;
         tokio::spawn(async move {
             delay_for(Duration::from_millis(ms as u64)).await;
+            info!("start kick peer:{}",session_id);
             if let Err(er) = sender.send(XBWrite::new()).await {
                 error!("kick_wait_ms err:{}-{:?}", er, er);
             }
