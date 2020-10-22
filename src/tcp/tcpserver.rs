@@ -55,6 +55,7 @@ where
                 if let Err(er)=socket.set_keepalive(Some(Duration::from_secs(5))){
                     error!("set socket keepalive err:{}",er);
                 }
+
                 if let Some(connect_event) = *self.connect_event.borrow() {
                     if !connect_event(addr) {
                         warn!("addr:{} not connect", addr);
