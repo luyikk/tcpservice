@@ -3,7 +3,7 @@ use log::*;
 use std::cell::RefCell;
 use std::error::Error;
 use std::future::Future;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, Shutdown};
 use std::option::Option::Some;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -66,11 +66,10 @@ where
 
                 let (tx, mut rx): (Sender<XBWrite>, Receiver<XBWrite>) = channel(1024);
                 let (reader, mut sender) = socket.into_split();
-
                 tokio::spawn(async move {
                     while let Some(buff) = rx.recv().await {
                         if buff.is_empty() {
-                            if let Err(er) = sender.shutdown().await {
+                            if let Err(er) =  sender.as_ref().shutdown(Shutdown::Both) {
                                 error!("{} disconnect error:{}", addr, er);
                             }
                             break;
