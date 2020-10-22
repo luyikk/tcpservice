@@ -98,7 +98,7 @@ async fn buff_input(mut peer: TCPPeer) {
                     break;
                 }
                 // 如果长度为0 或者超过最大限制 掐线
-                if packer_len > MAX_BUFF_LEN {
+                if packer_len > MAX_BUFF_LEN || packer_len==0{
                     warn!(
                         "disconnect peer:{} packer len error:{}",
                         client_peer, packer_len
@@ -138,7 +138,7 @@ async fn buff_input(mut peer: TCPPeer) {
 
 /// 安装日及系统
 fn init_log_system() {
-    let mut show_std = false;
+    let mut show_std = true;
 
     for arg in args() {
         if arg.trim().to_uppercase() == "--STDLOG" {

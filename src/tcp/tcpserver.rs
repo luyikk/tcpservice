@@ -10,6 +10,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use xbinary::XBWrite;
+use tokio::time::Duration;
 
 pub type ConnectEventType = fn(SocketAddr) -> bool;
 
@@ -51,6 +52,9 @@ where
         if let Some(mut listener) = self.listener.borrow_mut().take() {
             loop {
                 let (socket, addr) = listener.accept().await?;
+                if let Err(er)=socket.set_keepalive(Some(Duration::from_secs(5))){
+                    error!("set socket keepalive err:{}",er);
+                }
                 if let Some(connect_event) = *self.connect_event.borrow() {
                     if !connect_event(addr) {
                         warn!("addr:{} not connect", addr);
@@ -61,6 +65,7 @@ where
 
                 let (tx, mut rx): (Sender<XBWrite>, Receiver<XBWrite>) = channel(1024);
                 let (reader, mut sender) = socket.into_split();
+
                 tokio::spawn(async move {
                     while let Some(buff) = rx.recv().await {
                         if buff.is_empty() {
@@ -72,6 +77,8 @@ where
                             error!("{} send buffer error:{}", addr, er);
                         }
                     }
+
+                    info!("{} send rx is drop",addr);
                 });
 
                 let peer = TCPPeer::new(addr, reader, tx);
