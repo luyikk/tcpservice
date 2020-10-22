@@ -52,7 +52,7 @@ where
         if let Some(mut listener) = self.listener.borrow_mut().take() {
             loop {
                 let (socket, addr) = listener.accept().await?;
-                if let Err(er)=socket.set_keepalive(Some(Duration::from_secs(5))){
+                if let Err(er)=socket.set_keepalive(Some(Duration::from_secs(1))){
                     error!("set socket keepalive err:{}",er);
                 }
 
