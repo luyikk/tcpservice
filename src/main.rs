@@ -7,7 +7,7 @@ mod users;
 use crate::stdout_log::StdErrLog;
 use crate::tcp::TCPPeer;
 use crate::users::ClientPeer;
-use bytes::{BytesMut, Buf};
+use bytes::{Bytes};
 use flexi_logger::{Age, Cleanup, Criterion, LogTarget, Naming};
 use json::JsonValue;
 use lazy_static::lazy_static;
@@ -50,6 +50,7 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+
     //Builder::new().filter_level(LevelFilter::Debug).init();
     init_log_system();
     SERVICE_MANAGER.start().await?;
@@ -87,8 +88,6 @@ async fn buff_input(mut peer: TCPPeer) {
     debug!("create peer:{}", client_peer.session_id);
     match client_peer.open(0) {
         Ok(_) => {
-            // 创建一个vector 用来接收指定长度的数据,这样就可以避免粘包问题
-            let mut data = BytesMut::with_capacity(MAX_BUFF_LEN);
             //读取数据包长度
             while let Ok(packer_len) = peer.reader.read_u32_le().await {
                 let packer_len: usize = packer_len as usize;
@@ -98,17 +97,15 @@ async fn buff_input(mut peer: TCPPeer) {
                     break;
                 }
                 // 如果长度为0 或者超过最大限制 掐线
-                if packer_len > MAX_BUFF_LEN || packer_len==0{
+                if packer_len >= MAX_BUFF_LEN || packer_len==0{
                     warn!(
                         "disconnect peer:{} packer len error:{}",
                         client_peer, packer_len
                     );
                     break;
                 }
-                // 设置长度 接收指定长度的数据
-                unsafe {
-                    data.set_len(packer_len);
-                }
+
+                let mut data=vec![0;packer_len];
                 match peer.reader.read_exact(&mut data).await {
                     Err(er) => {
                         error!("peer:{} read data error:{}->{:?}", client_peer, er, er);
@@ -117,7 +114,7 @@ async fn buff_input(mut peer: TCPPeer) {
                     Ok(_len) => {
                         //数据包读取成功 输入逻辑处理
                         if let Err(er) = client_peer
-                            .input_buff(&mut sender, &mut service_handler, data.to_bytes())
+                            .input_buff(&mut sender, &mut service_handler, Bytes::from(data))
                             .await
                         {
                             error!("peer:{} input buff error:{}->{:?}", client_peer, er, er);
