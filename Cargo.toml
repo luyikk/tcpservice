@@ -21,6 +21,5 @@ json = "0.12.4"
 flexi_logger = "0.16.1"
 
 [profile.release]
-#lto = "fat"
-#codegen-units = 1
-debug=true
+lto = "fat"
+codegen-units = 1

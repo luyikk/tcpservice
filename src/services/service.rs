@@ -173,7 +173,7 @@ impl Service {
                                 ConnectCmd::Disconnect=>{
                                     unsafe {
                                         warn!("service:{} disconnect start close all users",service_id);
-                                        let need_close_ids:Vec<u32>=(*inner.open_table.get()).iter().map(|x|{x.clone()}).collect();
+                                        let need_close_ids:Vec<u32>=(*inner.open_table.get()).iter().copied().collect();
                                         (*inner.open_table.get()).clear();
                                         if let Err(er)= inner.client_handle.clone().close_all_user(service_id,need_close_ids){
                                             error!("service:{} disconnect close all user err{}",service_id,er);
