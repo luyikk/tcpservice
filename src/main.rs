@@ -137,6 +137,7 @@ async fn buff_input(mut peer: TCPPeer) {
         error!("remove peer:{} error:{}->{:?}", client_peer, er, er);
     }
     info!("{} disconnect", client_peer);
+
 }
 
 /// 安装日及系统
