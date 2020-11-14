@@ -17,40 +17,43 @@ use xbinary::{XBRead, XBWrite};
 
 
 ///用于存放发送句柄
-pub struct Sender(UnsafeCell<Option<UnboundedSender<XBWrite>>>);
+pub struct Sender(Mutex<Option<UnboundedSender<XBWrite>>>);
 
 unsafe impl Send for Sender {}
 unsafe impl Sync for Sender {}
 
 impl Sender {
     pub fn new() -> Sender {
-        Sender(UnsafeCell::new(None))
+        Sender(Mutex::new(None))
     }
 
-    pub fn get(&self) -> Option<UnboundedSender<XBWrite>> {
-        unsafe {
-            if let Some(ref p) = *self.0.get() {
-                Some(p.clone())
-            } else {
-                None
+    pub async fn get(&self) -> Option<UnboundedSender<XBWrite>> {
+        if let Some(ref p) = *self.0.lock().await {
+            Some(p.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn try_get(&self)->Option<UnboundedSender<XBWrite>> {
+        if let Some(p) = self.0.try_lock() {
+            if let Some(ref p) = *p {
+                return Some(p.clone())
             }
         }
+        None
     }
 
-    pub fn set(&self, p: UnboundedSender<XBWrite>) {
-        unsafe {
-            *self.0.get() = Some(p);
-        }
+    pub async fn set(&self, p: UnboundedSender<XBWrite>) {
+        *self.0.lock().await = Some(p);
     }
 
-    pub fn clean(&self) {
-        unsafe {
-            *self.0.get() = None;
-        }
+    pub async fn clean(&self) {
+        *self.0.lock().await = None;
     }
 
-    pub fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
-        if let Some(sender) = self.get() {
+    pub async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
+        if let Some(sender) = self.get().await {
             sender.send(data)?;
             Ok(())
         } else {
@@ -137,10 +140,10 @@ impl Service {
                     Ok((mut connect, sender)) => {
                         let mut reader = connect.read_rx.take().unwrap();
                         inner.connect.lock_arc().await.replace(connect);
-                        inner.sender.set(sender);
+                        inner.sender.set(sender).await;
                         info!("connect to {}-{}:{} OK", service_id, ip, port);
 
-                        if let Err(er) = Self::send_register(inner.gateway_id, &inner.sender) {
+                        if let Err(er) = Self::send_register(inner.gateway_id, &inner.sender).await {
                             error!("register {} gateway error:{:?}", service_id, er);
                             break;
                         }
@@ -163,7 +166,7 @@ impl Service {
                                                 "disconnect peer:{} to service:{}",
                                                 session_id, service_id
                                             );
-                                            if let Some(sender) = inner.sender.get() {
+                                            if let Some(sender) = inner.sender.get().await {
                                                 if let Err(er) =
                                                     Self::send_disconnect(session_id, sender)
                                                 {
@@ -227,7 +230,7 @@ impl Service {
             self.service_id, self.ip, self.port
         );
         self.inner.last_ping_time.store(0, Ordering::Release);
-        self.inner.sender.clean();
+        self.inner.sender.clean().await;
         self.inner.connect.lock_arc().await.take();
         self.try_connect(true).await;
         Ok(())
@@ -235,7 +238,7 @@ impl Service {
 
     /// PING检测
     pub fn check_ping(&self) {
-        if let Some(sender) = self.inner.sender.get() {
+        if let Some(sender) = self.inner.sender.try_get() {
             let last_ping_time = self.inner.last_ping_time.load(Ordering::Acquire);
             let now = Self::timestamp();
 
@@ -263,9 +266,9 @@ impl Service {
     }
 
     /// 发送数据
-    pub fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
-        self.inner.sender.send(data)
-    }
+    // pub fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
+    //     self.inner.sender.send(data)
+    // }
 
     /// 读取数据
     async fn read_data(
@@ -414,7 +417,7 @@ impl Service {
     pub async fn open(&self, session_id: u32, ipaddress: String) -> Result<(), Box<dyn Error>> {
         let mut wait_open_dict = self.inner.wait_open_table.lock().await;
         if wait_open_dict.insert(session_id) {
-            if let Err(er) = Self::send_open(session_id, ipaddress, &self.inner.sender) {
+            if let Err(er) = Self::send_open(session_id, ipaddress, &self.inner.sender).await {
                 wait_open_dict.remove(&session_id);
                 return Err(er);
             }
@@ -461,7 +464,7 @@ impl Service {
 
     /// 发送BUFF 智能路由用
     #[inline]
-    pub fn send_buffer_by_typeid(
+    pub async fn send_buffer_by_typeid(
         &self,
         session_id: u32,
         serial: i32,
@@ -476,26 +479,26 @@ impl Service {
         writer.write(buffer);
         writer.set_position(0);
         writer.put_u32_le(writer.len() as u32 - 4);
-        self.inner.sender.send(writer)?;
+        self.inner.sender.send(writer).await?;
         Ok(())
     }
 
     /// 发送BUFF
     #[inline]
-    pub fn send_buffer(&self, session_id: u32, buffer: &[u8]) -> Result<(), Box<dyn Error>> {
+    pub async fn send_buffer(&self, session_id: u32, buffer: &[u8]) -> Result<(), Box<dyn Error>> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(session_id);
         writer.write(buffer);
         writer.set_position(0);
         writer.put_u32_le(writer.len() as u32 - 4);
-        self.inner.sender.send(writer)?;
+        self.inner.sender.send(writer).await?;
         Ok(())
     }
 
     /// 发送OPEN
     #[inline]
-    fn send_open(
+    async fn send_open(
         session_id: u32,
         ipaddress: String,
         sender: &Arc<Sender>,
@@ -508,13 +511,13 @@ impl Service {
         writer.write_string_bit7_len(&ipaddress);
         writer.set_position(0);
         writer.put_u32_le(writer.len() as u32 - 4);
-        sender.send(writer)?;
+        sender.send(writer).await?;
         Ok(())
     }
 
     /// 发送注册网关
     #[inline]
-    fn send_register(gateway_id: u32, sender: &Arc<Sender>) -> Result<(), Box<dyn Error>> {
+    async fn send_register(gateway_id: u32, sender: &Arc<Sender>) -> Result<(), Box<dyn Error>> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(0xFFFFFFFFu32);
@@ -523,7 +526,7 @@ impl Service {
         writer.put_i8(1);
         writer.set_position(0);
         writer.put_u32_le(writer.len() as u32 - 4);
-        sender.send(writer)?;
+        sender.send(writer).await?;
         Ok(())
     }
 
@@ -540,7 +543,7 @@ impl Service {
         writer.bit7_write_u32(session_id);
         writer.set_position(0);
         writer.put_u32_le(writer.len() as u32 - 4);
-        sender.send(writer)?;
+        sender.send(writer) ?;
         Ok(())
     }
 

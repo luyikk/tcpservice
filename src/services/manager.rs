@@ -184,7 +184,7 @@ impl ServicesManager {
                                         {
                                             if let Err(er) = service.send_buffer_by_typeid(
                                                 session_id, serial, typeid, &buffer,
-                                            ) {
+                                            ).await {
                                                 error! {"sendbuff 0xEEEEEEEE error session_id:{} typeid:{} error:{}->{:?}",session_id,typeid,er,er}
                                             }
                                         } else {
@@ -201,7 +201,7 @@ impl ServicesManager {
                                 if let Some(service) =
                                     inner_service_manager.get_service(&service_id)
                                 {
-                                    if let Err(er) = service.send_buffer(session_id, &buffer) {
+                                    if let Err(er) = service.send_buffer(session_id, &buffer).await {
                                         error! {"sendbuff error service {} session_id:{} error:{}",service_id,session_id,er}
                                     }
                                 }
