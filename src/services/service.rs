@@ -1,3 +1,4 @@
+
 use super::super::users::ClientHandle;
 use super::connect::ConnectCmd;
 use super::manager::ServiceManagerHandler;
@@ -14,51 +15,93 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{delay_for, Duration};
 use xbinary::{XBRead, XBWrite};
+use aqueue::{InnerStore, AQueue};
 
 
 ///用于存放发送句柄
-pub struct Sender(Mutex<Option<UnboundedSender<XBWrite>>>);
+pub struct SenderInner(Option<UnboundedSender<XBWrite>>);
 
-unsafe impl Send for Sender {}
-unsafe impl Sync for Sender {}
-
-impl Sender {
-    pub fn new() -> Sender {
-        Sender(Mutex::new(None))
+impl SenderInner{
+    pub fn new() -> SenderInner {
+        SenderInner(None)
     }
-
-    pub async fn get(&self) -> Option<UnboundedSender<XBWrite>> {
-        if let Some(ref p) = *self.0.lock().await {
+    pub fn get(&self) -> Option<UnboundedSender<XBWrite>> {
+        if let Some(ref p) = self.0 {
             Some(p.clone())
         } else {
             None
         }
     }
-
-    pub fn try_get(&self)->Option<UnboundedSender<XBWrite>> {
-        if let Some(p) = self.0.try_lock() {
-            if let Some(ref p) = *p {
-                return Some(p.clone())
-            }
-        }
-        None
+    pub fn set(&mut self, p: UnboundedSender<XBWrite>) {
+        self.0 = Some(p);
     }
 
-    pub async fn set(&self, p: UnboundedSender<XBWrite>) {
-        *self.0.lock().await = Some(p);
+    pub fn clean(&mut self) {
+        self.0 = None;
     }
 
-    pub async fn clean(&self) {
-        *self.0.lock().await = None;
-    }
-
-    pub async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
-        if let Some(sender) = self.get().await {
+    pub fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error+Send+Sync>> {
+        if let Some(sender) = self.get() {
             sender.send(data)?;
             Ok(())
         } else {
             Err("not found sender tx, check connect".into())
         }
+    }
+
+}
+///用于存放发送句柄
+pub struct Sender{
+    inner:Arc<InnerStore<SenderInner>>,
+    queue:AQueue
+}
+impl Sender {
+    pub fn new() -> Sender {
+        Sender{
+            inner:Arc::new(InnerStore::new(SenderInner::new())),
+            queue:AQueue::new()
+        }
+    }
+
+    pub async fn get(&self) -> Option<UnboundedSender<XBWrite>> {
+        let res= self.queue.run(async move|inner|{
+             Ok(inner.get().get())
+         },self.inner.clone()).await;
+
+        match res {
+            Err(err)=>{
+                error!("sender get:{}",err);
+                None
+            },
+            Ok(v)=>v
+        }
+    }
+
+    pub async fn set(&self, p: UnboundedSender<XBWrite>) {
+      if let Err(err)=  self.queue.run(async move |inner| {
+          inner.get_mut().set(p);
+          Ok(())
+      },self.inner.clone()).await {
+          error!("sender set :{}",err);
+      }
+    }
+
+    pub async fn clean(&self) {
+        if let Err(err)=  self.queue.run(async move |inner|{
+            inner.get_mut().clean();
+            Ok(())
+        },self.inner.clone()).await {
+            error!("sender clean :{}",err);
+        }
+    }
+
+    pub async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
+        if let Err(err)= self.queue.run(async move |inner|{
+            Ok(inner.get().send(data))
+        },self.inner.clone()).await{
+            return Err(err)
+        }
+        Ok(())
     }
 }
 
@@ -237,8 +280,8 @@ impl Service {
     }
 
     /// PING检测
-    pub fn check_ping(&self) {
-        if let Some(sender) = self.inner.sender.try_get() {
+    pub async fn check_ping(&self) {
+        if let Some(sender) = self.inner.sender.get().await {
             let last_ping_time = self.inner.last_ping_time.load(Ordering::Acquire);
             let now = Self::timestamp();
 
@@ -265,10 +308,6 @@ impl Service {
         }
     }
 
-    /// 发送数据
-    // pub fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
-    //     self.inner.sender.send(data)
-    // }
 
     /// 读取数据
     async fn read_data(

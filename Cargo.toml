@@ -20,7 +20,7 @@ async-mutex = "1.4.0"
 lazy_static = "1.4.0"
 json = "0.12.4"
 flexi_logger = "0.16.1"
-
+aqueue="0.1.10"
 
 [profile.release]
 panic="abort"

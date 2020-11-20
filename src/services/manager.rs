@@ -224,8 +224,9 @@ impl ServicesManager {
                         }
                     }
                     CheckPing => {
-                        for service in inner_service_manager.services.borrow().values() {
-                            service.check_ping();
+                        let servers:Vec<Arc<Service>>=inner_service_manager.services.borrow().values().cloned().collect();
+                        for service in servers.iter() {
+                            service.check_ping().await;
                         }
                     }
                 }

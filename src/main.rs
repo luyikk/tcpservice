@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![feature(async_closure)]
 mod services;
 mod stdout_log;
 mod tcp;
