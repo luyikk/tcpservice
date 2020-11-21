@@ -6,7 +6,7 @@ use ahash::AHashSet;
 use async_mutex::Mutex;
 use bytes::{Buf, BufMut, Bytes};
 use log::*;
-use std::cell::{UnsafeCell};
+use std::cell::{UnsafeCell, RefCell};
 use std::error::Error;
 use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{delay_for, Duration};
 use xbinary::{XBRead, XBWrite};
-use aqueue::{InnerStore, AQueue};
+use aqueue::{AQueue};
 
 
 ///用于存放发送句柄
@@ -24,6 +24,7 @@ impl SenderInner{
     pub fn new() -> SenderInner {
         SenderInner(None)
     }
+    #[inline]
     pub fn get(&self) -> Option<UnboundedSender<XBWrite>> {
         if let Some(ref p) = self.0 {
             Some(p.clone())
@@ -31,14 +32,15 @@ impl SenderInner{
             None
         }
     }
+    #[inline]
     pub fn set(&mut self, p: UnboundedSender<XBWrite>) {
         self.0 = Some(p);
     }
-
+    #[inline]
     pub fn clean(&mut self) {
         self.0 = None;
     }
-
+    #[inline]
     pub fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error+Send+Sync>> {
         if let Some(sender) = self.get() {
             sender.send(data)?;
@@ -49,6 +51,18 @@ impl SenderInner{
     }
 
 }
+
+struct InnerStore<T>(RefCell<T>);
+unsafe impl<T> Sync for InnerStore<T>{}
+unsafe impl<T> Send for InnerStore<T>{}
+
+impl<T> InnerStore<T>{
+    #[inline]
+    fn new(x:T)-> InnerStore<T>{
+        InnerStore(RefCell::new(x))
+    }
+}
+
 ///用于存放发送句柄
 pub struct Sender{
     inner:Arc<InnerStore<SenderInner>>,
@@ -62,9 +76,10 @@ impl Sender {
         }
     }
 
+    #[inline]
     pub async fn get(&self) -> Option<UnboundedSender<XBWrite>> {
         let res= self.queue.run(async move|inner|{
-             Ok(inner.get().get())
+             Ok(inner.0.borrow().get())
          },self.inner.clone()).await;
 
         match res {
@@ -76,27 +91,30 @@ impl Sender {
         }
     }
 
+    #[inline]
     pub async fn set(&self, p: UnboundedSender<XBWrite>) {
       if let Err(err)=  self.queue.run(async move |inner| {
-          inner.get_mut().set(p);
+          inner.0.borrow_mut().set(p);
           Ok(())
       },self.inner.clone()).await {
           error!("sender set :{}",err);
       }
     }
 
+    #[inline]
     pub async fn clean(&self) {
         if let Err(err)=  self.queue.run(async move |inner|{
-            inner.get_mut().clean();
+            inner.0.borrow_mut().clean();
             Ok(())
         },self.inner.clone()).await {
             error!("sender clean :{}",err);
         }
     }
 
+    #[inline]
     pub async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
         if let Err(err)= self.queue.run(async move |inner|{
-            Ok(inner.get().send(data))
+            Ok(inner.0.borrow().send(data))
         },self.inner.clone()).await{
             return Err(err)
         }
