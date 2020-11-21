@@ -6,7 +6,7 @@ use ahash::AHashSet;
 use async_mutex::Mutex;
 use bytes::{Buf, BufMut, Bytes};
 use log::*;
-use std::cell::{UnsafeCell, RefCell};
+use std::cell::{UnsafeCell};
 use std::error::Error;
 use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{delay_for, Duration};
 use xbinary::{XBRead, XBWrite};
-use aqueue::{AQueue};
+use aqueue::Actor;
 
 
 ///用于存放发送句柄
@@ -52,36 +52,24 @@ impl SenderInner{
 
 }
 
-struct InnerStore<T>(RefCell<T>);
-unsafe impl<T> Sync for InnerStore<T>{}
-unsafe impl<T> Send for InnerStore<T>{}
-
-impl<T> InnerStore<T>{
-    #[inline]
-    fn new(x:T)-> InnerStore<T>{
-        InnerStore(RefCell::new(x))
-    }
+#[aqueue::aqueue_trait]
+pub trait SenderRunner{
+    async fn get(&self) -> Option<UnboundedSender<XBWrite>>;
+    async fn set(&self, p: UnboundedSender<XBWrite>);
+    async fn clean(&self);
+    async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>>;
 }
 
-///用于存放发送句柄
-pub struct Sender{
-    inner:Arc<InnerStore<SenderInner>>,
-    queue:AQueue
-}
-impl Sender {
-    pub fn new() -> Sender {
-        Sender{
-            inner:Arc::new(InnerStore::new(SenderInner::new())),
-            queue:AQueue::new()
-        }
-    }
+pub type Sender=Actor<SenderInner>;
+
+#[aqueue::aqueue_trait]
+impl SenderRunner for Sender {
 
     #[inline]
-    pub async fn get(&self) -> Option<UnboundedSender<XBWrite>> {
-        let res= self.queue.run(async move|inner|{
-             Ok(inner.0.borrow().get())
-         },self.inner.clone()).await;
-
+    async fn get(&self) -> Option<UnboundedSender<XBWrite>> {
+        let res= self.inner_call(async move|inner|{
+             Ok(inner.get_mut().get())
+         }).await;
         match res {
             Err(err)=>{
                 error!("sender get:{}",err);
@@ -92,30 +80,30 @@ impl Sender {
     }
 
     #[inline]
-    pub async fn set(&self, p: UnboundedSender<XBWrite>) {
-      if let Err(err)=  self.queue.run(async move |inner| {
-          inner.0.borrow_mut().set(p);
+    async fn set(&self, p: UnboundedSender<XBWrite>) {
+      if let Err(err)=  self.inner_call(async move |inner| {
+          inner.get_mut().set(p);
           Ok(())
-      },self.inner.clone()).await {
+      }).await {
           error!("sender set :{}",err);
       }
     }
 
     #[inline]
-    pub async fn clean(&self) {
-        if let Err(err)=  self.queue.run(async move |inner|{
-            inner.0.borrow_mut().clean();
+    async fn clean(&self) {
+        if let Err(err)=  self.inner_call(async move |inner|{
+            inner.get_mut().clean();
             Ok(())
-        },self.inner.clone()).await {
+        }).await {
             error!("sender clean :{}",err);
         }
     }
 
     #[inline]
-    pub async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
-        if let Err(err)= self.queue.run(async move |inner|{
-            Ok(inner.0.borrow().send(data))
-        },self.inner.clone()).await{
+    async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
+        if let Err(err)= self.inner_call(async move |inner|{
+            Ok(inner.get_mut().send(data))
+        }).await{
             return Err(err)
         }
         Ok(())
@@ -166,7 +154,7 @@ impl Service {
                 manager_handle: handler,
                 connect: Arc::new(Mutex::new(None)),
                 msg_ids: UnsafeCell::new(Vec::new()),
-                sender: Arc::new(Sender::new()),
+                sender: Arc::new(Sender::new(SenderInner::new())),
                 last_ping_time: AtomicI64::new(0),
                 ping_delay_tick: AtomicI64::new(0),
                 wait_open_table: Mutex::new(AHashSet::new()),
