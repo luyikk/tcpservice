@@ -20,9 +20,9 @@ dependencies = [
 
 [[package]]
 name = "aqueue"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ee0bf9bb074def0fc6e3ab636c528ca4c03910f3970dc5d36fac3351000f3a5"
+checksum = "ce1986c615f320e84716c09a8ca9462db0d04ccfacf3ceedaa43eea065f61fbd"
 dependencies = [
  "aqueue_trait",
  "async-oneshot",
