@@ -91,6 +91,11 @@ impl ClientPeer {
         service_handler: &mut ServiceHandler,
         data: Bytes,
     ) -> Result<(), Box<dyn Error>> {
+
+        if data.len()<4{
+            return Err( format!("peer:{} data len:{} <4",self.session_id,data.len()).into());
+        }
+
         let mut reader = XBRead::new(data);
         let server_id = reader.get_u32_le();
         self.last_recv_time
