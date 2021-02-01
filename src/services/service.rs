@@ -12,9 +12,10 @@ use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::time::{delay_for, Duration};
+use tokio::time::sleep;
 use xbinary::{XBRead, XBWrite};
-use aqueue::Actor;
+use aqueue::{Actor, AError};
+use std::time::Duration;
 
 
 ///用于存放发送句柄
@@ -101,12 +102,14 @@ impl SenderRunner for Sender {
 
     #[inline]
     async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
-        if let Err(err)= self.inner_call(async move |inner|{
-            Ok(inner.get_mut().send(data))
-        }).await{
-            return Err(err)
-        }
+        self.inner_call(async move |inner|{
+            match inner.get_mut().send(data){
+                Ok(())=>Ok(()),
+                Err(er)=>Err(AError::Other(er.into()))
+            }
+        }).await?;
         Ok(())
+
     }
 }
 
@@ -178,7 +181,7 @@ impl Service {
         let inner = self.inner.clone();
         tokio::spawn(async move {
             if need_wait {
-                delay_for(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(5)).await;
             }
 
             loop {
@@ -250,7 +253,7 @@ impl Service {
                     }
                 }
 
-                delay_for(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(5)).await;
             }
 
         });

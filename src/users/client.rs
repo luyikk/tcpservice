@@ -8,8 +8,9 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::Sender;
-use tokio::time::{delay_for, Duration};
+use tokio::time::sleep;
 use xbinary::{XBRead, XBWrite};
+use std::time::Duration;
 
 
 /// 客户端PEER
@@ -124,10 +125,10 @@ impl ClientPeer {
     pub async fn kick_wait_ms(&self,  ms: i32) -> Result<(), Box<dyn Error>> {
 
         self.send_close(0).await?;
-        let mut sender = self.sender.clone();
+        let sender = self.sender.clone();
         let session_id=self.session_id;
         tokio::spawn(async move {
-            delay_for(Duration::from_millis(ms as u64)).await;
+            sleep(Duration::from_millis(ms as u64)).await;
             info!("start kick peer:{}",session_id);
             if let Err(er) = sender.send(XBWrite::new()).await {
                 warn!("kick {} send disconnect err:{}",session_id, er);

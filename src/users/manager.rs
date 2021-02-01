@@ -8,9 +8,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::time::{delay_for, Duration};
+use tokio::time::sleep;
 use xbinary::XBRead;
 use ClientHandleCmd::*;
+use std::time::Duration;
 
 pub enum ClientHandleCmd {
     CreatePeer(Arc<ClientPeer>),
@@ -149,7 +150,7 @@ impl UserClientManager {
                     error!("check time out err:{}->{:?}", er, er);
                 }
                 //每隔5秒检查一次
-                delay_for(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(5)).await;
             }
         });
 

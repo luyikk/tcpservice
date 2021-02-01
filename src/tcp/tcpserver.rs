@@ -3,14 +3,13 @@ use log::*;
 use std::cell::RefCell;
 use std::error::Error;
 use std::future::Future;
-use std::net::{SocketAddr, Shutdown};
+use std::net::SocketAddr;
 use std::option::Option::Some;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use xbinary::XBWrite;
-use tokio::time::Duration;
 use std::marker::PhantomData;
 
 pub type ConnectEventType = fn(SocketAddr) -> bool;
@@ -48,12 +47,9 @@ where
 
     /// 启动TCP服务
     pub async fn start(&self) -> Result<(), Box<dyn Error>> {
-        if let Some(mut listener) = self.listener.borrow_mut().take() {
+        if let Some(listener) = self.listener.borrow_mut().take() {
             loop {
                 let (socket, addr) = listener.accept().await?;
-                if let Err(er)=socket.set_keepalive(Some(Duration::from_secs(1))){
-                    error!("set socket keepalive err:{}",er);
-                }
 
                 if let Some(connect_event) = *self.connect_event.borrow() {
                     if !connect_event(addr) {
@@ -68,7 +64,7 @@ where
                 tokio::spawn(async move {
                     while let Some(buff) = rx.recv().await {
                         if buff.is_empty() {
-                            if let Err(er) =  sender.as_ref().shutdown(Shutdown::Both) {
+                            if let Err(er) =  sender.shutdown().await {
                                 error!("{} disconnect error:{}", addr, er);
                             }
                             break;
