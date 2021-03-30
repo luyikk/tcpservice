@@ -3,7 +3,7 @@ name = "tcpgateway"
 version = "0.1.0"
 authors = ["yi lu <luyikk@126.com>"]
 edition = "2018"
-
+build="build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,6 +21,10 @@ lazy_static = "1.4.0"
 json = "0.12.4"
 flexi_logger = "0.16.1"
 aqueue="0.4"
+
+[build-dependencies]
+vergen = "5"
+anyhow = "1"
 
 [profile.release]
 panic="abort"
