@@ -122,12 +122,15 @@ impl ClientPeer {
     }
 
     /// 先发送断线包等待多少毫秒清理内存
-    pub async fn kick_wait_ms(&self,  ms: i32) -> Result<(), Box<dyn Error>> {
+    pub async fn kick_wait_ms(&self,  mut ms: i32) -> Result<(), Box<dyn Error>> {
 
         self.send_close(0).await?;
         let sender = self.sender.clone();
         let session_id=self.session_id;
         tokio::spawn(async move {
+            if ms >30000 || ms <0{
+                ms=5000;
+            }
             sleep(Duration::from_millis(ms as u64)).await;
             info!("start kick peer:{}",session_id);
             if let Err(er) = sender.send(XBWrite::new()).await {
