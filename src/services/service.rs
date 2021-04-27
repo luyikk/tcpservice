@@ -353,87 +353,69 @@ impl Service {
                         }
                         "open" => {
                             let session_id = reader.read_bit7_u32();
-                            if session_id.0 > 0 {
-                                reader.advance(session_id.0);
-                                let session_id = session_id.1;
-                                if session_id == 0 {
-                                    //如果是0号服务器需要到表里面查询一番 查不到打警告返回
-                                    if !inner.wait_open_table.lock().await.remove(&session_id) {
-                                        warn!("service:{} not found SessionId:{} open is fail,Maybe the client is disconnected.", service_id, session_id);
-                                        return Ok(());
-                                    }
-                                }
+                            ensure!(session_id.0 > 0,"service:{} read open session_id fail",service_id);
+                            reader.advance(session_id.0);
 
-                                unsafe {
-                                    if (*inner.open_table.get()).insert(session_id) {
-                                        inner
-                                            .client_handle
-                                            .clone()
-                                            .open_service(service_id, session_id)?;
-                                    } else {
-                                        warn!(
-                                            "service: {} insert SessionId:{} open is fail",
-                                            service_id, session_id
-                                        );
-                                    }
+                            let session_id = session_id.1;
+                            if session_id == 0 {
+                                //如果是0号服务器需要到表里面查询一番 查不到打警告返回
+                                if !inner.wait_open_table.lock().await.remove(&session_id) {
+                                    warn!("service:{} not found SessionId:{} open is fail,Maybe the client is disconnected.", service_id, session_id);
+                                    return Ok(());
                                 }
-                            } else {
-                                bail!(
-                                    "service:{} read open session_id fail",
-                                    service_id
-                                )
+                            }
+
+                            unsafe {
+                                if (*inner.open_table.get()).insert(session_id) {
+                                    inner
+                                        .client_handle
+                                        .clone()
+                                        .open_service(service_id, session_id)?;
+                                } else {
+                                    warn!(
+                                        "service: {} insert SessionId:{} open is fail",
+                                        service_id, session_id
+                                    );
+                                }
                             }
                         }
                         "close" => {
                             let session_id = reader.read_bit7_u32();
-                            if session_id.0 > 0 {
-                                reader.advance(session_id.0);
-                                let session_id = session_id.1;
-                                // 如果TRUE 说明还没OPEN 就被CLOSE了
-                                if !inner.wait_open_table.lock().await.remove(&session_id) {
-                                    unsafe {
-                                        if !(*inner.open_table.get()).remove(&session_id) {
-                                            //如果OPEN表里面找不到那么打警告返回
-                                            warn!(
-                                                "service:{} not found SessionId:{} close is fail",
-                                                service_id, session_id
-                                            );
-                                            return Ok(());
-                                        }
+                            ensure!(session_id.0 > 0,"service:{} read close is fail", service_id);
+                            reader.advance(session_id.0);
+
+                            let session_id = session_id.1;
+                            // 如果TRUE 说明还没OPEN 就被CLOSE了
+                            if !inner.wait_open_table.lock().await.remove(&session_id) {
+                                unsafe {
+                                    if !(*inner.open_table.get()).remove(&session_id) {
+                                        //如果OPEN表里面找不到那么打警告返回
+                                        warn!(
+                                            "service:{} not found SessionId:{} close is fail",
+                                            service_id, session_id
+                                        );
+                                        return Ok(());
                                     }
                                 }
-                                inner
-                                    .client_handle
-                                    .clone()
-                                    .close_peer(service_id, session_id)?;
-                            } else {
-                                bail!("service:{} read close is fail", service_id)
                             }
+                            inner
+                                .client_handle
+                                .clone()
+                                .close_peer(service_id, session_id)?;
                         }
                         "kick" => {
                             let session_id = reader.read_bit7_u32();
-                            if session_id.0 > 0 {
-                                reader.advance(session_id.0);
-                                let session_id = session_id.1;
-                                let delay_ms = reader.read_bit7_i32();
-                                if delay_ms.0 > 0 {
-                                    reader.advance(delay_ms.0);
-                                    let delay_ms = delay_ms.1;
-
-                                    inner
-                                        .client_handle
-                                        .clone()
-                                        .kick_peer(service_id, session_id, delay_ms)?;
-
-                                } else {
-                                    bail!(
-                                        "service:{} read kick delay is fail",
-                                        service_id
-                                    )
-                                }
-                            } else {
-                                bail!("service:{} read kick is fail", service_id)
-                            }
+                            ensure!(session_id.0 > 0,"service:{} read kick is fail", service_id);
+                            reader.advance(session_id.0);
+                            let session_id = session_id.1;
+                            let delay_ms = reader.read_bit7_i32();
+                            ensure!(delay_ms.0 > 0,"service:{} incompatible cmd:{}", service_id, cmd);
+                            reader.advance(delay_ms.0);
+                            let delay_ms = delay_ms.1;
+                            inner
+                                .client_handle
+                                .clone()
+                                .kick_peer(service_id, session_id, delay_ms)?;
                         }
                         _ => {
                             bail!("service:{} incompatible cmd:{}", service_id, cmd)
