@@ -203,8 +203,7 @@ impl Service {
                         while let Some(data) = reader.recv().await {
                             match data {
                                 ConnectCmd::Buff(data) => {
-                                    if let Err(er) = Self::read_data(data, service_id, &inner).await
-                                    {
+                                    if let Err(er) = Self::read_data(data, service_id, &inner).await {
                                         error!("read data error:{:?}", er);
                                     }
                                 }
