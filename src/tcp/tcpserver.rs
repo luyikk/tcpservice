@@ -1,7 +1,6 @@
 use crate::tcp::TCPPeer;
 use log::*;
 use std::cell::RefCell;
-use std::error::Error;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::option::Option::Some;
@@ -11,6 +10,7 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use xbinary::XBWrite;
 use std::marker::PhantomData;
+use anyhow::*;
 
 pub type ConnectEventType = fn(SocketAddr) -> bool;
 
@@ -30,7 +30,7 @@ where
     pub async fn new<T: ToSocketAddrs>(
         addr: T,
         input: I,
-    ) -> Result<TCPServer<I, R>, Box<dyn Error>> {
+    ) -> Result<TCPServer<I, R>> {
         let listener = TcpListener::bind(addr).await?;
         Ok(TCPServer {
             listener: RefCell::new(Some(listener)),
@@ -46,7 +46,7 @@ where
     }
 
     /// 启动TCP服务
-    pub async fn start(&self) -> Result<(), Box<dyn Error>> {
+    pub async fn start(&self) -> Result<()> {
         if let Some(listener) = self.listener.borrow_mut().take() {
             loop {
                 let (socket, addr) = listener.accept().await?;
@@ -58,7 +58,6 @@ where
                     }
                 }
                 trace!("start read:{}", addr);
-
                 let (tx, mut rx): (Sender<XBWrite>, Receiver<XBWrite>) = channel(1024);
                 let (reader, mut sender) = socket.into_split();
                 tokio::spawn(async move {
@@ -84,6 +83,6 @@ where
             }
         }
 
-        Err("not listener or repeat start".into())
+        bail!("not listener or repeat start")
     }
 }

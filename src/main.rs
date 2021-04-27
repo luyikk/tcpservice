@@ -12,16 +12,16 @@ use bytes::{Bytes};
 use flexi_logger::{Age, Cleanup, Criterion, LogTarget, Naming};
 use json::JsonValue;
 use lazy_static::lazy_static;
-use log::*;
 use mimalloc::MiMalloc;
 use services::ServicesManager;
-use std::env::args;
-use std::error::Error;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tcp::TCPServer;
 use tokio::io::AsyncReadExt;
 use users::UserClientManager;
+use log::*;
+use anyhow::*;
+use structopt::*;
 
 
 /// 最大数据表长度限制 512K
@@ -50,7 +50,7 @@ lazy_static! {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
 
     //Builder::new().filter_level(LevelFilter::Debug).init();
     init_log_system();
@@ -141,24 +141,28 @@ async fn buff_input(mut peer: TCPPeer) {
 
 }
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "tcp gateway server")]
+#[structopt(version=version())]
+struct Opt{
+    /// 是否显示 日志 到控制台
+    #[structopt(short, long)]
+    stdlog:bool,
+    /// 是否打印崩溃堆栈
+    #[structopt(short, long)]
+    backtrace:bool
+}
+
+
 /// 安装日及系统
 fn init_log_system() {
-    let mut show_std =false;
 
-    for arg in args() {
-        if arg.trim().to_uppercase() == "--STDLOG" {
-            show_std = true;
-            println!("open stderr log out");
-        }
-        else if arg.trim().to_uppercase()=="-V"{
-            println!("Build Timestamp: {}", env!("VERGEN_BUILD_TIMESTAMP"));
-            println!("GIT BRANCH: {}",env!("VERGEN_GIT_BRANCH"));
-            println!("GIT COMMIT DATE: {}",env!("VERGEN_GIT_COMMIT_TIMESTAMP"));
-            println!("GIT SHA: {}",env!("VERGEN_GIT_SHA"));
-            println!("PROFILE: {}",env!("VERGEN_CARGO_PROFILE"));
-            panic!("-vv")
-        }
+    let opt=Opt::from_args();
+    if opt.backtrace{
+        std::env::set_var("RUST_BACKTRACE","1");
     }
+
+    let mut show_std =opt.stdlog;
     for (name, arg) in std::env::vars() {
         if name.trim() == "STDLOG" && arg.trim() == "1" {
             show_std = true;
@@ -185,4 +189,21 @@ fn init_log_system() {
         .set_palette("196;190;6;7;8".into())
         .start()
         .unwrap();
+}
+
+
+#[inline(always)]
+fn version()->&'static str{
+    concat! {
+    "\n",
+    "==================================version info==================================",
+    "\n",
+    "Build Timestamp:", env!("VERGEN_BUILD_TIMESTAMP"), "\n",
+    "GIT BRANCH:", env!("VERGEN_GIT_BRANCH"), "\n",
+    "GIT COMMIT DATE:", env!("VERGEN_GIT_COMMIT_TIMESTAMP"), "\n",
+    "GIT SHA:", env!("VERGEN_GIT_SHA"), "\n",
+    "PROFILE:", env!("VERGEN_CARGO_PROFILE"), "\n",
+    "==================================version end==================================",
+    "\n",
+    }
 }

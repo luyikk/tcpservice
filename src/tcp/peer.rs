@@ -1,9 +1,9 @@
-use std::error::Error;
 use std::net::SocketAddr;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::sync::mpsc::Sender;
 use xbinary::XBWrite;
 use log::*;
+use anyhow::*;
 
 pub struct TCPPeer {
     pub addr: SocketAddr,
@@ -33,19 +33,19 @@ impl TCPPeer {
     }
 
     /// 发送
-    pub async fn send(&self, buff: XBWrite) -> Result<(), Box<dyn Error>> {
+    pub async fn send(&self, buff: XBWrite) -> Result<()> {
         self.get_sender().send(buff).await?;
         Ok(())
     }
 
     /// 发送 mut 版
-    pub async fn send_mut(&mut self, buff: XBWrite) -> Result<(), Box<dyn Error>> {
+    pub async fn send_mut(&mut self, buff: XBWrite) -> Result<()> {
         self.sender.send(buff).await?;
         Ok(())
     }
 
     /// 掐线
-    pub async fn disconnect(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn disconnect(&mut self) -> Result<()> {
         self.send(XBWrite::new()).await
     }
 }

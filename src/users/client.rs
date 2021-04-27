@@ -2,7 +2,6 @@ use crate::services::{ServiceHandler, ServicesCmd};
 use bytes::{Buf, BufMut, Bytes};
 use core::fmt;
 use log::*;
-use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
@@ -11,7 +10,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::time::sleep;
 use xbinary::{XBRead, XBWrite};
 use std::time::Duration;
-
+use anyhow::*;
 
 /// 客户端PEER
 
@@ -67,7 +66,7 @@ impl ClientPeer {
     }
 
     /// 服务器通知 设置OPEN成功
-    pub async fn open_service(&self, service_id: u32) -> Result<(), Box<dyn Error>> {
+    pub async fn open_service(&self, service_id: u32) -> Result<()> {
         info!("service:{} open peer:{} OK", service_id, self.session_id);
         self.is_open_zero.store(true, Ordering::Release);
         self.send_open(service_id).await?;
@@ -75,7 +74,7 @@ impl ClientPeer {
     }
 
     /// 服务器通知 关闭某个服务
-    pub async fn close_service(&self, service_id: u32) -> Result<(), Box<dyn Error>> {
+    pub async fn close_service(&self, service_id: u32) -> Result<()> {
         info!("service:{} Close peer:{} OK", service_id, self.session_id);
         if service_id == 0 {
             self.kick().await?;
@@ -91,11 +90,9 @@ impl ClientPeer {
         sender: &mut Sender<XBWrite>,
         service_handler: &mut ServiceHandler,
         data: Bytes,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
 
-        if data.len()<4{
-            return Err( format!("peer:{} data len:{} <4",self.session_id,data.len()).into());
-        }
+        ensure!(data.len()>4,"peer:{} data len:{} <4",self.session_id,data.len());
 
         let mut reader = XBRead::new(data);
         let server_id = reader.get_u32_le();
@@ -122,7 +119,7 @@ impl ClientPeer {
     }
 
     /// 先发送断线包等待多少毫秒清理内存
-    pub async fn kick_wait_ms(&self,  mut ms: i32) -> Result<(), Box<dyn Error>> {
+    pub async fn kick_wait_ms(&self,  mut ms: i32) -> Result<()> {
 
         self.send_close(0).await?;
         let sender = self.sender.clone();
@@ -142,14 +139,14 @@ impl ClientPeer {
     }
 
     /// 发送 CLOSE 0 后立即断线清理内存
-    async fn kick(&self) -> Result<(), Box<dyn Error>> {
+    async fn kick(&self) -> Result<()> {
         self.send_close(0).await?;
         self.disconnect_now().await?;
         Ok(())
     }
 
     /// 立即断线,清理内存
-    pub async fn disconnect_now(&self) -> Result<(), Box<dyn Error>> {
+    pub async fn disconnect_now(&self) -> Result<()> {
         // 先关闭OPEN 0 标志位
         self.is_open_zero.store(false, Ordering::Release);
 
@@ -174,7 +171,7 @@ impl ClientPeer {
         sender: &mut Sender<XBWrite>,
         session_id: u32,
         data: &[u8],
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(session_id);
@@ -187,7 +184,7 @@ impl ClientPeer {
 
     /// 发送OPEN
     #[inline]
-    pub async fn send_open(&self, service_id: u32) -> Result<(), Box<dyn Error>> {
+    pub async fn send_open(&self, service_id: u32) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(0xFFFFFFFF);
@@ -201,7 +198,7 @@ impl ClientPeer {
 
     /// 发送CLOSE 0
     #[inline]
-    pub async fn send_close(&self, service_id: u32) -> Result<(), Box<dyn Error>> {
+    pub async fn send_close(&self, service_id: u32) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(0xFFFFFFFF);
@@ -223,7 +220,7 @@ impl ClientPeer {
     #[inline]
     fn make_conv() -> u32 {
         let old = MAKE_SESSION_ID.fetch_add(1, Ordering::Release);
-        if old == u32::max_value() - 1 {
+        if old == u32::MAX - 1 {
             MAKE_SESSION_ID.store(1, Ordering::Release);
         }
         old

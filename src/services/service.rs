@@ -7,16 +7,15 @@ use async_mutex::Mutex;
 use bytes::{Buf, BufMut, Bytes};
 use log::*;
 use std::cell::{UnsafeCell};
-use std::error::Error;
 use std::io;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::sleep;
 use xbinary::{XBRead, XBWrite};
-use aqueue::{Actor, AError};
+use aqueue::Actor;
 use std::time::Duration;
-
+use anyhow::*;
 
 ///用于存放发送句柄
 pub struct SenderInner(Option<UnboundedSender<XBWrite>>);
@@ -42,28 +41,28 @@ impl SenderInner{
         self.0 = None;
     }
     #[inline]
-    pub fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error+Send+Sync>> {
+    pub fn send(&self, data: XBWrite) -> Result<()> {
         if let Some(sender) = self.get() {
             sender.send(data)?;
             Ok(())
         } else {
-            Err("not found sender tx, check connect".into())
+            bail!("not found sender tx, check connect")
         }
     }
 
 }
 
-#[aqueue::aqueue_trait]
+#[async_trait::async_trait]
 pub trait SenderRunner{
     async fn get(&self) -> Option<UnboundedSender<XBWrite>>;
     async fn set(&self, p: UnboundedSender<XBWrite>);
     async fn clean(&self);
-    async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>>;
+    async fn send(&self, data: XBWrite) -> Result<()>;
 }
 
 pub type Sender=Actor<SenderInner>;
 
-#[aqueue::aqueue_trait]
+#[async_trait::async_trait]
 impl SenderRunner for Sender {
 
     #[inline]
@@ -101,15 +100,10 @@ impl SenderRunner for Sender {
     }
 
     #[inline]
-    async fn send(&self, data: XBWrite) -> Result<(), Box<dyn Error>> {
+    async fn send(&self, data: XBWrite) -> Result<()> {
         self.inner_call(async move |inner|{
-            match inner.get_mut().send(data){
-                Ok(())=>Ok(()),
-                Err(er)=>Err(AError::Other(er.into()))
-            }
-        }).await?;
-        Ok(())
-
+            inner.get_mut().send(data)
+        }).await
     }
 }
 
@@ -196,6 +190,12 @@ impl Service {
 
                         if let Err(er) = Self::send_register(inner.gateway_id, &inner.sender).await {
                             error!("register {} gateway error:{:?}", service_id, er);
+                            if let Err(er) = inner.sender.send(XBWrite::new()).await {
+                                error!(
+                                    "service{} ping time out,need disconnect error:{}->{:?}",
+                                    service_id, er, er
+                                );
+                            }
                             break;
                         }
 
@@ -273,7 +273,7 @@ impl Service {
     }
 
     /// 断线
-    pub async fn disconnect(&self) -> Result<(), Box<dyn Error>> {
+    pub async fn disconnect(&self) -> Result<()> {
         info!(
             "service:{}-{}-{} disconnect start reconnect",
             self.service_id, self.ip, self.port
@@ -320,14 +320,14 @@ impl Service {
         data: Vec<u8>,
         service_id: u32,
         inner: &Arc<ServiceInner>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let mut reader = XBRead::new(Bytes::from(data));
         let session_id = reader.get_u32_le();
         if session_id == 0xFFFFFFFFu32 {
             //到网关的数据
             let cmd = reader.read_string_bit7_len();
             match cmd {
-                None => return Err(format!("service:{} not read cmd", service_id).into()),
+                None => bail!("service:{} not read cmd", service_id),
                 Some(cmd) => {
                     match &cmd[..] {
                         "typeids" => {
@@ -378,11 +378,10 @@ impl Service {
                                     }
                                 }
                             } else {
-                                return Err(format!(
+                                bail!(
                                     "service:{} read open session_id fail",
                                     service_id
                                 )
-                                .into());
                             }
                         }
                         "close" => {
@@ -408,9 +407,7 @@ impl Service {
                                     .clone()
                                     .close_peer(service_id, session_id)?;
                             } else {
-                                return Err(
-                                    format!("service:{} read close is fail", service_id).into()
-                                );
+                                bail!("service:{} read close is fail", service_id)
                             }
                         }
                         "kick" => {
@@ -429,22 +426,17 @@ impl Service {
                                         .kick_peer(service_id, session_id, delay_ms)?;
 
                                 } else {
-                                    return Err(format!(
+                                    bail!(
                                         "service:{} read kick delay is fail",
                                         service_id
                                     )
-                                    .into());
                                 }
                             } else {
-                                return Err(
-                                    format!("service:{} read kick is fail", service_id).into()
-                                );
+                                bail!("service:{} read kick is fail", service_id)
                             }
                         }
                         _ => {
-                            return Err(
-                                format!("service:{} incompatible cmd:{}", service_id, cmd).into()
-                            );
+                            bail!("service:{} incompatible cmd:{}", service_id, cmd)
                         }
                     }
                 }
@@ -459,7 +451,7 @@ impl Service {
     }
 
     /// 发起OPEN请求
-    pub async fn open(&self, session_id: u32, ipaddress: String) -> Result<(), Box<dyn Error>> {
+    pub async fn open(&self, session_id: u32, ipaddress: String) -> Result<()> {
         let mut wait_open_dict = self.inner.wait_open_table.lock().await;
         if wait_open_dict.insert(session_id) {
             if let Err(er) = Self::send_open(session_id, ipaddress, &self.inner.sender).await {
@@ -469,11 +461,11 @@ impl Service {
             return Ok(());
         }
 
-        Err(format!("repeat open:{}", session_id).into())
+        bail!("repeat open:{}", session_id)
     }
 
     /// 客户端断线调用
-    pub async fn client_drop(&self, session_id: u32) -> Result<(), Box<dyn Error>> {
+    pub async fn client_drop(&self, session_id: u32) -> Result<()> {
         let connect = self.inner.connect.lock_arc().await;
         if let Some(ref connect) = *connect {
             connect
@@ -515,7 +507,7 @@ impl Service {
         serial: i32,
         typeid: i32,
         buffer: &[u8],
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(session_id);
@@ -530,7 +522,7 @@ impl Service {
 
     /// 发送BUFF
     #[inline]
-    pub async fn send_buffer(&self, session_id: u32, buffer: &[u8]) -> Result<(), Box<dyn Error>> {
+    pub async fn send_buffer(&self, session_id: u32, buffer: &[u8]) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(session_id);
@@ -547,7 +539,7 @@ impl Service {
         session_id: u32,
         ipaddress: String,
         sender: &Arc<Sender>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(0xFFFFFFFFu32);
@@ -562,7 +554,7 @@ impl Service {
 
     /// 发送注册网关
     #[inline]
-    async fn send_register(gateway_id: u32, sender: &Arc<Sender>) -> Result<(), Box<dyn Error>> {
+    async fn send_register(gateway_id: u32, sender: &Arc<Sender>) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(0xFFFFFFFFu32);
@@ -580,7 +572,7 @@ impl Service {
     fn send_disconnect(
         session_id: u32,
         sender: UnboundedSender<XBWrite>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(0xFFFFFFFFu32);
@@ -594,7 +586,7 @@ impl Service {
 
     /// 发送PING包
     #[inline]
-    fn send_ping(time: i64, sender: UnboundedSender<XBWrite>) -> Result<(), Box<dyn Error>> {
+    fn send_ping(time: i64, sender: UnboundedSender<XBWrite>) -> Result<()> {
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(0xFFFFFFFFu32);
