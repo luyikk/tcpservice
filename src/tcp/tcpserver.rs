@@ -50,7 +50,6 @@ where
         if let Some(listener) = self.listener.borrow_mut().take() {
             loop {
                 let (socket, addr) = listener.accept().await?;
-
                 if let Some(connect_event) = *self.connect_event.borrow() {
                     if !connect_event(addr) {
                         warn!("addr:{} not connect", addr);
@@ -58,7 +57,7 @@ where
                     }
                 }
                 trace!("start read:{}", addr);
-                let (tx, mut rx): (Sender<XBWrite>, Receiver<XBWrite>) = channel(1024);
+                let (tx, mut rx): (Sender<XBWrite>, Receiver<XBWrite>) = channel(4096);
                 let (reader, mut sender) = socket.into_split();
                 tokio::spawn(async move {
                     while let Some(buff) = rx.recv().await {
@@ -69,6 +68,7 @@ where
                             break;
                         } else if let Err(er) = sender.write(&buff).await {
                             error!("{} send buffer error:{}", addr, er);
+                            break;
                         }
                     }
 

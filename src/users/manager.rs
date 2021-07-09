@@ -100,7 +100,7 @@ impl ClientHandle {
     pub fn close_peer(&mut self, service_id: u32, session_id: u32) -> ClientHandleError {
         self.tx.send(ClosePeer(service_id, session_id))
     }
-    /// 强制T
+    /// 强制TOpenPeer
     pub fn kick_peer(
         &mut self,
         service_id: u32,
@@ -239,15 +239,19 @@ impl UserClientManager {
                     //转发给客户端数据
                     SendBuffer(service_id, session_id, buffer) => {
                         if let Some(peer) = manager.get_peer(&session_id) {
-                            if let Err(err) = peer
-                                .send(&mut peer.sender.clone(), service_id, &buffer)
-                                .await
-                            {
-                                error!(
+                            let mut sender = peer.sender.clone();
+                            // test
+                            tokio::spawn(async move {
+                                if let Err(err) = peer
+                                    .send(&mut sender, service_id, &buffer)
+                                    .await
+                                {
+                                    error!(
                                     "service:{}  peer:{} send buffer error:{}->{:?}",
                                     service_id, peer, err, err
-                                )
-                            }
+                                    )
+                                }
+                            })
                         }
                     }
                     CheckTimeOut => {
