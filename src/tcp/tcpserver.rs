@@ -6,11 +6,12 @@ use std::net::SocketAddr;
 use std::option::Option::Some;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, ToSocketAddrs};
+use tokio::net::{TcpListener, ToSocketAddrs, TcpStream};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use xbinary::XBWrite;
 use std::marker::PhantomData;
 use anyhow::*;
+use std::time::Duration;
 
 pub type ConnectEventType = fn(SocketAddr) -> bool;
 
@@ -50,6 +51,9 @@ where
         if let Some(listener) = self.listener.borrow_mut().take() {
             loop {
                 let (socket, addr) = listener.accept().await?;
+                let socket=socket.into_std()?;
+                socket.set_write_timeout(Some(Duration::from_secs(5)))?;
+                let socket=TcpStream::from_std(socket)?;
                 if let Some(connect_event) = *self.connect_event.borrow() {
                     if !connect_event(addr) {
                         warn!("addr:{} not connect", addr);
