@@ -172,6 +172,7 @@ impl ClientPeer {
         session_id: u32,
         data: &[u8],
     ) -> Result<()> {
+        ensure!(!sender.is_closed(),"client peer sender is close");
         let mut writer = XBWrite::new();
         writer.put_u32_le(0);
         writer.put_u32_le(session_id);

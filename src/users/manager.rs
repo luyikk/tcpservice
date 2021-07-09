@@ -251,7 +251,7 @@ impl UserClientManager {
                                     service_id, peer, err, err
                                     )
                                 }
-                            })
+                            });
                         }
                     }
                     CheckTimeOut => {
