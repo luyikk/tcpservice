@@ -153,7 +153,7 @@ impl ServicesManager {
                     Disconnect(service_id) => {
                         if let Some(service) = inner_service_manager.get_service(&service_id) {
                             if let Err(er) = service.disconnect().await {
-                                error! {"disconnect service {} error:{}->{:?}",service_id,er,er}
+                                error! {"disconnect service {} error:{}",service_id,er}
                             }
                         } else {
                             error! {"disconnect not found service {} ",service_id}
@@ -162,7 +162,7 @@ impl ServicesManager {
                     OpenService(session_id, service_id, ipaddress) => {
                         if let Some(service) = inner_service_manager.get_service(&service_id) {
                             if let Err(er) = service.open(session_id, ipaddress).await {
-                                error! {"open service {} session_id:{} error:{}->{:?}",service_id,session_id,er,er}
+                                error! {"open service {} session_id:{} error:{}",service_id,session_id,er}
                             }
                         } else {
                             error! {"open service session_id:{} not found service {}",session_id,service_id}

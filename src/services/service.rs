@@ -102,7 +102,7 @@ impl SenderRunner for Sender {
     #[inline]
     async fn send(&self, data: XBWrite) -> Result<()> {
         self.inner_call(async move |inner|{
-            inner.get_mut().send(data)
+            inner.get().send(data)
         }).await
     }
 }
@@ -111,7 +111,7 @@ pub struct ServiceInner {
     pub gateway_id: u32,
     pub manager_handle: ServiceManagerHandler,
     pub connect: Arc<Mutex<Option<Connect>>>,
-    pub msg_ids: UnsafeCell<Vec<i32>>,
+    pub msg_ids: UnsafeCell<AHashSet<i32>>,
     pub sender: Arc<Sender>,
     pub last_ping_time: AtomicI64,
     pub ping_delay_tick: AtomicI64,
@@ -150,7 +150,7 @@ impl Service {
                 gateway_id,
                 manager_handle: handler,
                 connect: Arc::new(Mutex::new(None)),
-                msg_ids: UnsafeCell::new(Vec::new()),
+                msg_ids: UnsafeCell::new(AHashSet::new()),
                 sender: Arc::new(Sender::new(SenderInner::new())),
                 last_ping_time: AtomicI64::new(0),
                 ping_delay_tick: AtomicI64::new(0),
@@ -334,7 +334,7 @@ impl Service {
                             let len = reader.get_u32_le();
                             unsafe {
                                 for _ in 0..len {
-                                    (*inner.msg_ids.get()).push(reader.get_i32_le());
+                                    (*inner.msg_ids.get()).insert(reader.get_i32_le());
                                 }
                             }
                             info!("Service:{} push typeids count:{}", service_id, len);
