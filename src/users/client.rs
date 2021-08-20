@@ -125,7 +125,7 @@ impl ClientPeer {
         let sender = self.sender.clone();
         let session_id=self.session_id;
         tokio::spawn(async move {
-            if ms >30000 || ms <0{
+            if !(0..=30000).contains(&ms){
                 ms=5000;
             }
             sleep(Duration::from_millis(ms as u64)).await;

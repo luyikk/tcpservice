@@ -26,11 +26,7 @@ impl SenderInner{
     }
     #[inline]
     pub fn get(&self) -> Option<UnboundedSender<XBWrite>> {
-        if let Some(ref p) = self.0 {
-            Some(p.clone())
-        } else {
-            None
-        }
+        self.0.as_ref().cloned()
     }
     #[inline]
     pub fn set(&mut self, p: UnboundedSender<XBWrite>) {
@@ -345,11 +341,10 @@ impl Service {
                             if tick.0 > 0 {
                                 reader.advance(tick.0);
                                 inner.ping_delay_tick.store(now - tick.1, Ordering::Release);
-                                inner.last_ping_time.store(now, Ordering::Release);
                             } else {
                                 warn!("service:{} read ping tick fail", service_id);
-                                inner.last_ping_time.store(now, Ordering::Release);
                             }
+                            inner.last_ping_time.store(now, Ordering::Release);
                         }
                         "open" => {
                             let session_id = reader.read_bit7_u32();
