@@ -15,7 +15,7 @@ use tokio::time::sleep;
 use xbinary::{XBRead, XBWrite};
 use aqueue::Actor;
 use std::time::Duration;
-use anyhow::*;
+use anyhow::{bail, ensure, Result};
 
 ///用于存放发送句柄
 pub struct SenderInner(Option<UnboundedSender<XBWrite>>);
